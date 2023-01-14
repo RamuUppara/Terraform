@@ -1,0 +1,148 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: webappconfigmap
+data:
+  username: webapp
+  password: mysql@123
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysqlsecrets
+type: Opaque
+stringData:   # We can define multiple key value pairs.
+  password: deepa@123
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-hostpath
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 1Gi
+  accessModes:
+  - ReadWriteOnce
+  hostPath:
+    path: "/tmp/mysql"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-hostpath
+spec:
+  storageClassName: manual
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+
+---
+## Maven web-App
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      name: webapp-pod
+      labels:
+        app: webapp
+    spec:
+      containers:
+      - name: webapp-container
+        image: deepakshipurushotham/srs_micro_service
+        ports:
+        - containerPort: 8080
+        env:
+        - name: MYSQL_DB_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: webappconfigmap
+              key: username
+        - name: MYSQL_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: springappsecrets
+              key: password
+        - name: MYSQL_DB_HOSTNAME
+          value: mysql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp
+spec:
+  selector:
+    app: webapp
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: NodePort
+---
+# Mysql db pod with volumes(HostPath)
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: Deployment
+metadata:
+  name: mysql
+  labels:
+    app: mysqlbd
+spec:
+  selector:
+    matchLabels:
+      app: mysqlbd 
+      tier: mysql
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: mysqlbd
+        tier: mysql
+    spec:
+      containers:
+      - command:
+        - tail
+        - "-f"
+        - /dev/null
+      - image: mysql:5.6
+        name: mysql
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysqlsecrets
+              key: password
+        ports:
+        - containerPort: 3306
+          name: mysql
+        volumeMounts:
+        - name: mysql-persistent-storage
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: mysql-persistent-storage
+        persistentVolumeClaim:
+          claimName: mysql-pv-claim
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  labels:
+    app: mysqlbd
+spec:
+  ports:
+    - port: 3306
+  selector:
+    app: mysqlbd
+    tier: mysql
+  clusterIP: None
